@@ -86,14 +86,22 @@ class Portly {
 
 (async () => {
 
+	const domain = process.env.DOMAIN;
+	const envName = process.env.PORT_ENV_NAME || "PORT";
+
+	if (!domain) {
+		console.error(`Portly configuration error: Missing required environment variable DOMAIN.`);
+		process.exit(1);
+	};
+
 	try {
 
 		const portly = new Portly(
-			process.env.PORT_ENV_NAME || "PORT",
+			envName,
 			"./nginx-template.txt",
-			"chat.eggspank.cloud",
+			domain,
 			[
-				["DOMAIN", "chat.eggspank.cloud"],
+				["DOMAIN", domain],
 				["PORT", ""]
 			]
 		);

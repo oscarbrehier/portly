@@ -65,7 +65,7 @@ PORT=$<YOUR_ENV_VAR_NAME> pm2 start ./build/index.js --name my-app --update-env
 |-----------|--------------|----------|
 | `PORT_MIN` | Minimum port number to scan | `3000` |
 | `PORT_MAX` | Maximum port number to scan | `PORT_MIN + 600` |
-| `PORT_ENV_NAME` | The name of the environment variable that stores the found port | **Required** |
+| `PORT_ENV_NAME` | The name of the environment variable that stores the found port | `PORT` |
 | `DOMAIN` | Your app’s domain name (used in Nginx config) | **Required** |
 
 
