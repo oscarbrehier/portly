@@ -1,0 +1,25 @@
+{
+  "name": "portly",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oscarbrehier/portly.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/oscarbrehier/portly/issues"
+  },
+  "homepage": "https://github.com/oscarbrehier/portly#readme",
+  "dependencies": {
+    "portfinder": "^1.0.38"
+  }
+}
