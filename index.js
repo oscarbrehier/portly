@@ -37,7 +37,9 @@ class Portly {
 		console.log("Available port found:", availablePort);
 
 		process.env[this.portEnvName] = availablePort;
-		console.log(`export ${this.portEnvName}=${availablePort}`);
+		
+		const envFilePath = path.join(this.__dirname, ".portly.env");
+		await fs.promises.writeFile(envFilePath, `export ${this.portEnvName}=${availablePort}\n`, 'utf-8');
 
 		try {
 
