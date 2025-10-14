@@ -7,18 +7,14 @@ const PORT_MIN = process.env.PORT_MIN ? Number(process.env.PORT_MIN) : 3000;
 const PORT_MAX = process.env.PORT_MAX ? Number(process.env.PORT_MAX) : PORT_MIN + 600;
 
 class Portly {
-
 	constructor(portEnvName, templatePath, domain, placeholders) {
-
 		this.portEnvName = portEnvName;
 		this.templatePath = templatePath;
 		this.domain = domain;
 		this.placeholders = placeholders;
-
 		this.content = null;
 		this.__dirname = path.dirname(new URL(import.meta.url).pathname);
 		this.server = null;
-
 	};
 
 	async getConfiguration() {
@@ -32,7 +28,7 @@ class Portly {
 			availablePort = await portfinder.getPortPromise();
 		} catch (err) {
 			throw new Error(`Error finding available port: ${err}`);
-		};
+		}
 
 		if (!availablePort) return this;
 
@@ -56,11 +52,9 @@ class Portly {
 
 			this.content = content;
 			return this;
-			
+
 		} catch (err) {
-
 			throw new Error(`Error reading template file: ${err}`);
-
 		};
 
 	};
@@ -70,13 +64,13 @@ class Portly {
 		return new Promise((resolve, reject) => {
 
 			this.server = net.createServer();
-
-			this.server.listen(port, "127.0.0.1", () => {
+			
+			this.server.listen(port, '127.0.0.1', () => {
 				console.log(`Port ${port} is now reserved and held by Portly`);
 				resolve();
 			});
 
-			this.server.on("error", (err) => {
+			this.server.on('error', (err) => {
 				reject(new Error(`Failed to hold port ${port}: ${err.message}`));
 			});
 
@@ -92,16 +86,12 @@ class Portly {
 		const nginxConfigFilePath = path.join(configDir, this.domain);
 
 		try {
-
 			await fs.promises.mkdir(configDir, { recursive: true });
 			await fs.promises.writeFile(nginxConfigFilePath, this.content, { encoding: "utf-8" });
 
 			console.log(`Config written to ${nginxConfigFilePath}`);
-
 		} catch (err) {
-
 			throw new Error(`Cannot write Nginx config: ${err}`);
-
 		};
 
 	};
@@ -109,10 +99,10 @@ class Portly {
 	async writeEnvFile() {
 
 		const envFilePath = path.join(this.__dirname, ".portly.env");
-		const envContent = `export ${this.portEnvName}=${process.env[this.portEnvName]}`;
+		const envContent = `export ${this.portEnvName}=${process.env[this.portEnvName]}\n`;
 
 		try {
-			await fs.promises.writeFile(envFilePath, envContent, "utf-8");
+			await fs.promises.writeFile(envFilePath, envContent, { encoding: "utf-8" });
 			console.log(`Environment file written to ${envFilePath}`);
 		} catch (err) {
 			throw new Error(`Cannot write environment file: ${err}`);
@@ -124,13 +114,13 @@ class Portly {
 
 		const shutdown = () => {
 
+			console.log("\nShutdown signal received. Releasing port...");
+			
 			if (this.server) {
-				
 				this.server.close(() => {
-					console.log("Port released. Exiting Portly");
+					console.log("Port released. Portly exiting.");
 					process.exit(0);
 				});
-
 			} else {
 				process.exit(0);
 			};
@@ -140,12 +130,9 @@ class Portly {
 		process.on("SIGTERM", shutdown);
 		process.on("SIGINT", shutdown);
 
-		setInterval(() => {
-
-		}, 1000);
+		setInterval(() => {}, 1000);
 
 	};
-
 };
 
 (async () => {
@@ -156,10 +143,9 @@ class Portly {
 	if (!domain) {
 		console.error(`Portly configuration error: Missing required environment variable DOMAIN.`);
 		process.exit(1);
-	};
+	}
 
 	try {
-
 		const portly = new Portly(
 			envName,
 			"./nginx-template.txt",
@@ -177,10 +163,8 @@ class Portly {
 		portly.keepAlive();
 
 	} catch (err) {
-
 		console.error(`Portly execution failed: ${err}`);
 		process.exit(1);
-
 	};
 
 })();
