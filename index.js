@@ -1,14 +1,18 @@
+import "dotenv/config";
 import portfinder from "portfinder";
 import fs from "fs";
 import path from "path";
+import net from "net";
+import { exec } from "child_process";
 
 const PORT_MIN = process.env.PORT_MIN ? Number(process.env.PORT_MIN) : 3000;
 const PORT_MAX = process.env.PORT_MAX ? Number(process.env.PORT_MAX) : PORT_MIN + 600;
 
 class Portly {
 
-	constructor(portEnvName, templatePath, domain, placeholders) {
+	constructor(appName, portEnvName, templatePath, domain, placeholders) {
 
+		this.appName = appName;
 		this.portEnvName = portEnvName;
 		this.templatePath = templatePath;
 		this.domain = domain;
@@ -19,27 +23,110 @@ class Portly {
 
 	};
 
-	async getConfiguration() {
+	isPortInUse(port) {
 
-		let availablePort;
+		return new Promise((resolve) => {
 
-		portfinder.setBasePort(PORT_MIN);
-		portfinder.setHighestPort(PORT_MAX);
+			const server = net.createServer();
+			server.once("error", resolve(true));
+			server.once("listening", () => {
+				server.close(() => resolve(false));
+			});
+			server.listen(port);
+
+		});
+
+	};
+
+	async getPreviousAssignedPort() {
 
 		try {
-			availablePort = await portfinder.getPortPromise();
+
+			const envFilePath = path.join(this.__dirname, ".portly.env");
+			if (!fs.existsSync(envFilePath)) return null;
+
+			const data = await fs.promises.readFile(envFilePath, "utf-8");
+			const match = data.match(new RegExp(`export ${this.portEnvName}=(\\d+)`));
+			return match ? Number(match[1]) : null;
+
 		} catch (err) {
-			throw new Error(`Error finding available port: ${err}`);
+			return null;
 		};
 
-		if (!availablePort) return this;
+	};
 
-		console.log("Available port found:", availablePort);
+	async checkProcess(port, appName) {
 
-		process.env[this.portEnvName] = availablePort;
-		
+		return new Promise((resolve) => {
+
+			exec(`lsof -i :${port} -t`, (errPort, stdoutPort, stderrPort) => {
+
+				if (errPort) {
+					return resolve(false);
+				};
+
+				const portProcessId = stdoutPort.trim();
+
+				exec(`pm2 pid ${appName}`, (errorPm2, stdoutPm2, stderrPm2) => {
+
+					if (errorPm2) {
+						return resolve(false);
+					};
+
+					const pm2ProcessId = stdoutPm2.trim();
+
+					if (portProcessId === pm2ProcessId) {
+						resolve(true);
+					} else {
+						resolve(false);
+					};
+
+				});
+
+			});
+
+		});
+
+
+	};
+
+	async getConfiguration() {
+
+		let selectedPort;
+
+		const previousAssignedPort = await this.getPreviousAssignedPort();
+		if (previousAssignedPort && previousAssignedPort >= PORT_MIN && previousAssignedPort <= PORT_MAX) {
+
+			const inUse = await this.isPortInUse(previousAssignedPort);
+			const isSameProcess = await this.checkProcess(previousAssignedPort, this.appName);
+
+			if (!inUse && !isSameProcess) {
+				selectedPort = previousAssignedPort
+			};
+
+		};
+
+		if (!selectedPort) {
+
+			portfinder.setBasePort(PORT_MIN);
+			portfinder.setHighestPort(PORT_MAX);
+
+			try {
+
+				selectedPort = await portfinder.getPortPromise();
+				console.log("Available port found:", selectedPort);
+
+			} catch (err) {
+				throw new Error(`Error finding available port: ${err}`);
+			};
+
+		}
+
+
+		process.env[this.portEnvName] = selectedPort;
+
 		const envFilePath = path.join(this.__dirname, ".portly.env");
-		await fs.promises.writeFile(envFilePath, `export ${this.portEnvName}=${availablePort}\n`, 'utf-8');
+		await fs.promises.writeFile(envFilePath, `export ${this.portEnvName}=${selectedPort}\n`, 'utf-8');
 
 		try {
 
@@ -49,12 +136,12 @@ class Portly {
 			let content = data;
 
 			this.placeholders.forEach(([key, value]) => {
-				content = content.replaceAll(`{{${key}}}`, key === "PORT" ? availablePort : value);
+				content = content.replaceAll(`{{${key}}}`, key === "PORT" ? selectedPort : value);
 			});
 
 			this.content = content;
 			return this;
-			
+
 		} catch (err) {
 
 			throw new Error(`Error reading template file: ${err}`);
@@ -88,8 +175,14 @@ class Portly {
 
 (async () => {
 
+	const appName = process.env.APP_NAME;
 	const domain = process.env.DOMAIN;
 	const envName = process.env.PORT_ENV_NAME || "PORT";
+
+	if (!appName) {
+		console.error(`Portly configuration error: Missing required environment variable APP_NAME.`);
+		process.exit(1);
+	};
 
 	if (!domain) {
 		console.error(`Portly configuration error: Missing required environment variable DOMAIN.`);
@@ -99,6 +192,7 @@ class Portly {
 	try {
 
 		const portly = new Portly(
+			appName,
 			envName,
 			"./nginx-template.txt",
 			domain,

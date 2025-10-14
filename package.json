@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/oscarbrehier/portly#readme",
   "dependencies": {
+    "dotenv": "^17.2.3",
     "portfinder": "^1.0.38"
   }
 }
