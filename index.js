@@ -1,6 +1,7 @@
 import portfinder from "portfinder";
 import fs from "fs";
 import path from "path";
+import net from "net";
 
 const PORT_MIN = process.env.PORT_MIN ? Number(process.env.PORT_MIN) : 3000;
 const PORT_MAX = process.env.PORT_MAX ? Number(process.env.PORT_MAX) : PORT_MIN + 600;
@@ -16,6 +17,7 @@ class Portly {
 
 		this.content = null;
 		this.__dirname = path.dirname(new URL(import.meta.url).pathname);
+		this.server = null;
 
 	};
 
@@ -35,6 +37,8 @@ class Portly {
 		if (!availablePort) return this;
 
 		console.log("Available port found:", availablePort);
+
+		await this.holdPort(availablePort);
 
 		process.env[this.portEnvName] = availablePort;
 		console.log(`export ${this.portEnvName}=${availablePort}`);
@@ -61,6 +65,25 @@ class Portly {
 
 	};
 
+	async holdPort(port) {
+
+		return new Promise((resolve, reject) => {
+
+			this.server = net.createServer();
+
+			this.server.listen(port, "127.0.0.1", () => {
+				console.log(`Port ${port} is now reserved and held by Portly`);
+				resolve();
+			});
+
+			this.server.on("error", (err) => {
+				reject(new Error(`Failed to hold port ${port}: ${err.message}`));
+			});
+
+		});
+
+	};
+
 	async writeConfigFile() {
 
 		if (!this.content) return null;
@@ -82,6 +105,47 @@ class Portly {
 		};
 
 	};
+
+	async writeEnvFile() {
+
+		const envFilePath = path.join(this.__dirname, ".portly.env");
+		const envContent = `export ${this.portEnvName}=${process.env[this.portEnvName]}`;
+
+		try {
+			await fs.promises.writeFile(envFilePath, envContent, "utf-8");
+			console.log(`Environment file written to ${envFilePath}`);
+		} catch (err) {
+			throw new Error(`Cannot write environment file: ${err}`);
+		};
+
+	};
+
+	keepAlive() {
+
+		const shutdown = () => {
+
+			if (this.server) {
+				
+				this.server.close(() => {
+					console.log("Port released. Exiting Portly");
+					process.exit(0);
+				});
+
+			} else {
+				process.exit(0);
+			};
+
+		};
+
+		process.on("SIGTERM", shutdown);
+		process.on("SIGINT", shutdown);
+
+		setInterval(() => {
+
+		}, 1000);
+
+	};
+
 };
 
 (async () => {
@@ -108,6 +172,10 @@ class Portly {
 
 		await portly.getConfiguration();
 		await portly.writeConfigFile();
+		await portly.writeEnvFile();
+
+		portly.keepAlive();
+
 	} catch (err) {
 
 		console.error(`Portly execution failed: ${err}`);
