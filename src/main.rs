@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand, ValueHint};
 use regex::Regex;
-use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::{fs};
 use tokio::process::Command;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
@@ -30,6 +30,8 @@ pub enum Commands {
         forced: bool,
         #[arg(long, value_hint = ValueHint::FilePath, default_value = ".portly.env")]
         env_file: PathBuf,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        expand_max: bool,
     },
 }
 
@@ -168,6 +170,7 @@ async fn main() {
             app_name,
             forced,
             env_file,
+            expand_max,
         } => {
             if min >= max {
                 error!(
@@ -192,19 +195,65 @@ async fn main() {
                             port = Some(previous_port);
                             info!("Reusing previous port: {}", previous_port);
                         }
-                    }   
+                    }
                 }
             }
 
             if port.is_none() {
-                match get_available_port(min, max).await {
-                    Ok(new_port) => {
-                        info!("Found available port: {}", new_port);
-                        port = Some(new_port)
-                    }
-                    Err(e) => {
-                        error!("Failed to find available port: {}", e);
-                        return ;
+                let mut current_max = max;
+                const MAX_PORT: u16 = 65535;
+
+                loop {
+                    match get_available_port(min, current_max).await {
+                        Ok(found_port) => {
+                            info!("Found available port: {}", found_port);
+                            port = Some(found_port);
+                            break;
+                        }
+                        Err(err) => {
+                            if !expand_max {
+                                error!(
+                                    "No available port found in range {}-{}: {}",
+                                    min, current_max, err
+                                );
+                                break;
+                            }
+
+                            let remaining = MAX_PORT.saturating_sub(current_max);
+
+                            if remaining == 0 {
+                                error!("Reached max port limit (65535). Cannot expand further");
+                                break;
+                            }
+
+                            let mut increment = (remaining as f64 * 0.1) as u16;
+
+                            const MIN_INCREMENT: u16 = 50;
+                            if increment > MIN_INCREMENT {
+                                increment = MIN_INCREMENT;
+                            };
+
+                            const MAX_INCREMENT: u16 = 2000;
+                            if increment > MAX_INCREMENT {
+                                increment = MAX_INCREMENT;
+                            }
+
+                            let new_max = current_max.saturating_add(increment).min(MAX_PORT);
+
+                            if new_max > 60000 && current_max <= 60000 {
+                                warn!("Approaching high port range (> 60000)");
+                            }
+                            if new_max > 65000 && current_max <= 65000 {
+                                warn!("Very close to port upper limit (> 65000)");
+                            }
+
+                            info!(
+                                "No port found in {}-{}, expanding max from {} to {} (Inc={})",
+                                min, current_max, current_max, new_max, increment
+                            );
+
+                            current_max = new_max;
+                        }
                     }
                 }
             }
