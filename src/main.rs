@@ -1,11 +1,11 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueHint};
 use regex::Regex;
-use std::error::Error;
-use std::fmt::format;
 use std::fs;
-use std::io::BufReader;
+use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
+use tracing::{error, info};
+use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser)]
 #[command(name = "portly", version, about = "")]
@@ -18,14 +18,18 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Port {
-        #[arg(long)]
-        min: i16,
-        #[arg(long)]
-        max: i16,
+        #[arg(long, value_parser = validate_port_range)]
+        min: u16,
+        #[arg(long, value_parser = validate_port_range)]
+        max: u16,
         #[arg(long)]
         key: String,
         #[arg(short)]
         app_name: Option<String>,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        forced: bool,
+        #[arg(long, value_hint = ValueHint::FilePath, default_value = ".portly.env")]
+        env_file: PathBuf,
     },
 }
 
@@ -39,15 +43,27 @@ pub enum PortError {
     ScanFailed,
 }
 
-async fn is_port_available(port: i16) -> bool {
-    return tokio::net::TcpListener::bind(("127.0.0.1", port as u16))
-        .await
-        .is_ok();
+fn validate_port_range(val: &str) -> Result<u16, String> {
+    val.parse::<u16>()
+        .map_err(|_| format!("`{val}` is not a valid port number"))
 }
 
-pub async fn get_available_port(min: i16, max: i16) -> Result<i16, PortError> {
+async fn is_port_available(port: u16) -> Result<bool, PortError> {
+    match tokio::net::TcpListener::bind(("127.0.0.1", port as u16)).await {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::AddrInUse {
+                Ok(false)
+            } else {
+                Err(PortError::Io(e))
+            }
+        }
+    }
+}
+
+pub async fn get_available_port(min: u16, max: u16) -> Result<u16, PortError> {
     for port in min..=max {
-        if is_port_available(port).await {
+        if is_port_available(port).await.unwrap_or(false) {
             return Ok(port);
         }
     }
@@ -55,17 +71,19 @@ pub async fn get_available_port(min: i16, max: i16) -> Result<i16, PortError> {
     Err(PortError::ScanFailed)
 }
 
-pub async fn get_previous_assigned_port(env_name: String) -> Option<i16> {
+pub async fn get_previous_assigned_port(env_file: &PathBuf, env_name: &str) -> Option<u16> {
+    let content: String = fs::read_to_string(env_file).unwrap_or_default();
     let re = Regex::new(&format!("{}=(\\d+)", env_name)).ok()?;
-    let env_content: String = fs::read_to_string(".portly.env").unwrap();
 
-    for line in env_content.lines() {
+    for line in content.lines() {
         if let Some(caps) = re.captures(line) {
             if let Some(port_str) = caps.get(1) {
-                if let Ok(port) = port_str.as_str().parse::<i16>() {
-                    if is_port_available(port).await {
-                        return Some(port);
-                    }
+                if let Ok(port) = port_str.as_str().parse::<u16>() {
+                    return match is_port_available(port).await {
+                        Ok(true) => Some(port),
+                        Ok(false) => None,
+                        Err(_) => None,
+                    };
                 }
             }
         }
@@ -74,26 +92,27 @@ pub async fn get_previous_assigned_port(env_name: String) -> Option<i16> {
     None
 }
 
-fn write_to_env_file(env_name: String, port: i16) {
+fn write_to_env_file(env_file: &PathBuf, env_name: &str, port: u16) {
     let content = format!("export {}={}", env_name, port);
 
-    if fs::write(".portly.env", content).is_err() {
-        println!("Failed to write port to .portly.env file");
-    };
+    if let Err(e) = fs::write(".portly.env", content) {
+        error!("Failed to write port to {}: {}", env_file.display(), e);
+    } else {
+        info!("Port {} written to {}", port, env_file.display());
+    }
 }
 
-pub async fn is_port_owned_by_app(app_name: String, port: i16) -> bool {
+pub async fn is_port_owned_by_app(app_name: &str, port: u16) -> bool {
     let output_lsof = Command::new("lsof")
         .args(["-i", &format!(":${}", port.to_string()), "-t"])
         .stdout(Stdio::piped())
-        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .output()
         .await;
 
     let Ok(output_lsof) = output_lsof else {
         return false;
     };
-
     if !output_lsof.status.success() {
         return false;
     };
@@ -117,7 +136,6 @@ pub async fn is_port_owned_by_app(app_name: String, port: i16) -> bool {
     let Ok(output_pm2) = output_pm2 else {
         return false;
     };
-
     if !output_pm2.status.success() {
         return false;
     };
@@ -135,52 +153,67 @@ pub async fn is_port_owned_by_app(app_name: String, port: i16) -> bool {
 
 #[tokio::main]
 async fn main() {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(tracing::Level::INFO)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Port { min, max, key, app_name } => {
-            if let Some(app_name) = app_name {
-                let mut port: Option<i16> = None;
+        Commands::Port {
+            min,
+            max,
+            key,
+            app_name,
+            forced,
+            env_file,
+        } => {
+            if min >= max {
+                error!(
+                    "Invalid range. min ({}) must be less than max ({})",
+                    min, max
+                );
+                return;
+            };
 
-                if let Some(previous_assigned_port) =
-                    get_previous_assigned_port("PORT".to_string()).await
-                {
-                    if previous_assigned_port >= min && previous_assigned_port <= max {
-                        let is_in_use = is_port_available(previous_assigned_port).await;
-                        let is_same_process =
-                            is_port_owned_by_app(app_name.to_string(), previous_assigned_port)
-                                .await;
+            let mut port: Option<u16> = None;
 
-                        if !is_in_use && !is_same_process {
-                            port = Some(previous_assigned_port);
-                            println!(
-                                "Previous port is still available. Using: {}",
-                                previous_assigned_port
-                            );
+            if !forced {
+                if let Some(previous_port) = get_previous_assigned_port(&env_file, &key).await {
+                    if previous_port >= min && previous_port <= max {
+                        let same_process = if let Some(app) = &app_name {
+                            is_port_owned_by_app(app, previous_port).await
+                        } else {
+                            false
+                        };
+
+                        if !same_process {
+                            port = Some(previous_port);
+                            info!("Reusing previous port: {}", previous_port);
                         }
-                    }
+                    }   
                 }
-
-                if !port.is_some() {
-                    let available_port = match get_available_port(min, max).await {
-                        Ok(value) => value,
-                        Err(err) => {
-                            eprintln!("Error finding available port: {}", err);
-                            return;
-                        }
-                    };
-
-                    println!("Found available port: {}", available_port);
-                }
-
-                write_to_env_file(key, port.unwrap());
-
             }
 
-            // get_previous_assigned_port("PORT".to_string());
-            // let port = get_available_port(min, max).await.unwrap();
-            // write_to_env_file("HELLO".to_string(), port);
-            // println!("Found available port: {}", port);
+            if port.is_none() {
+                match get_available_port(min, max).await {
+                    Ok(new_port) => {
+                        info!("Found available port: {}", new_port);
+                        port = Some(new_port)
+                    }
+                    Err(e) => {
+                        error!("Failed to find available port: {}", e);
+                        return ;
+                    }
+                }
+            }
+
+            if let Some(p) = port {
+                write_to_env_file(&env_file, &key, p);
+            } else {
+                error!("No port could be assigned");
+            }
         }
     }
 }
