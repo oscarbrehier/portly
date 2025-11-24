@@ -140,3 +140,7 @@ vite.config.ts.timestamp-*
 
 server.js
 nginx_template.txt
+
+# Added by cargo
+
+/target

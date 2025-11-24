@@ -125,7 +125,7 @@ class Portly {
 
 		process.env[this.portEnvName] = selectedPort;
 
-		const envFilePath = path.join(this.__dirname, ".portly.env");
+		const envFilePath = path.join(process.cwd(), ".portly.env");
 		await fs.promises.writeFile(envFilePath, `export ${this.portEnvName}=${selectedPort}\n`, 'utf-8');
 
 		try {
