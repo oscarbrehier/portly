@@ -25,15 +25,17 @@
 ### Build from Source
 
 1. Clone this repository:
-   ```bash
-   git clone https://github.com/oscarbrehier/portly.git
-   cd portly
-   ```
+
+```bash
+git clone https://github.com/oscarbrehier/portly.git
+cd portly
+```
 2. Build and install:
-   ```bash
-   cargo build --release
-   cargo install --path .
-   ```
+
+```bash
+cargo build --release
+cargo install --path .
+```
 
 ### Download Prebuilt Binaries
 
@@ -45,7 +47,7 @@ You can download prebuilt binaries for your platform from the [GitHub Releases p
 curl -LO https://github.com/oscarbrehier/portly/releases/download/v0.1.0/portly-x86_64-linux
 chmod +x portly-x86_64-linux
 ./portly-x86_64-linux
-
+```
 ---
 
 ## Usage
