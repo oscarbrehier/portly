@@ -144,3 +144,4 @@ nginx_template.txt
 # Added by cargo
 
 /target
+notes.txt
