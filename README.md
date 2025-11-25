@@ -35,6 +35,17 @@
    cargo install --path .
    ```
 
+### Download Prebuilt Binaries
+
+You can download prebuilt binaries for your platform from the [GitHub Releases page](https://github.com/oscarbrehier/portly/releases).
+
+**Linux (x86_64)**
+
+```bash
+curl -LO https://github.com/oscarbrehier/portly/releases/download/v0.1.0/portly-x86_64-linux
+chmod +x portly-x86_64-linux
+./portly-x86_64-linux
+
 ---
 
 ## Usage
